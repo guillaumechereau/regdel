@@ -1,0 +1,287 @@
+#!/usr/bin/python
+
+# Regdel, a ncurses inteface to ledger
+#
+# copyright (c) 2016 Guillaume Chereau <guillaume@noctua-software.com>
+#
+# Regdel is free software: you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later
+# version.
+#
+# Regdel is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License along with
+# regdel.  If not, see <http://www.gnu.org/licenses/>.
+
+import itertools
+from collections import namedtuple
+import curses
+import datetime
+import subprocess
+import sys
+import csv
+
+LineInfo = namedtuple('LineInfo', ['color_id', 'color', 'bg', 'attr'])
+
+# XXX: how to clean this up?
+LINE_INFOS = {
+    "bar": LineInfo(0, curses.COLOR_WHITE, curses.COLOR_BLUE, curses.A_BOLD),
+    "cursor": LineInfo(0, curses.COLOR_WHITE, curses.COLOR_GREEN, curses.A_BOLD),
+    "date": LineInfo(0, curses.COLOR_BLUE, -1, 0),
+    "value_pos": LineInfo(0, curses.COLOR_GREEN, -1, 0),
+    "value_neg": LineInfo(0, curses.COLOR_RED, -1, 0),
+}
+
+KEY_MAP = {
+    ord('k'):           "PREV_LINE",
+    ord('j'):           "NEXT_LINE",
+    curses.KEY_UP:      "PREV_LINE",
+    curses.KEY_DOWN:    "NEXT_LINE",
+    ord('q'):           "QUIT",
+    ord('c'):           "CURRENCY",
+    ord('\n'):          "SELECT",
+    ord(' '):           "NEXT_PAGE",
+    ord('g'):           "FIRST_LINE",
+    curses.KEY_HOME:    "FIRST_LINE",
+    ord('G'):           "LAST_LINE",
+    curses.KEY_END:     "LAST_LINE",
+}
+
+def clamp(x, a, b): return min(max(x, a), b)
+
+def ledger(path, cmd, query="", form=None, currency=None, options=None):
+    args = ['ledger', '-f', path]
+    args += [cmd]
+    if options: args += options
+    form_keys = None
+    if isinstance(form, dict):
+        form_keys = form.keys()
+        form = form.values()
+    if form is not None:
+        form = ','.join('%(quoted({}))'.format(x) for x in form)
+        form += '\n\n'
+        args += ['--format', form]
+    if currency is not None:
+        args += ['-X', currency]
+    args += [query]
+    out = subprocess.check_output(args)
+    out = out.split('\n\n' if form else '\n')
+    if form is not None:
+        out = [x for x in csv.reader(out)]
+        if form_keys is not None:
+            out = [{k:v for k, v in zip(form_keys, x)} for x in out]
+    return out
+
+
+class View(object):
+
+    def __init__(self, app, win):
+        self.app = app
+        self.lineno = 0
+        h, w = win.getmaxyx()
+        self.full = win
+        self.win = curses.newwin(h - 1, w, 1, 0)
+        self.bar = curses.newwin(1, w, 0, 0)
+        self.bar.bkgdset(' ', self.get_attr('bar'))
+        self.w = w
+        self.h = h - 1
+        self.offset = 0
+
+    def get_attr(self, line):
+        if line in LINE_INFOS:
+            inf = LINE_INFOS[line]
+            return curses.color_pair(inf.color_id) | inf.attr
+        else:
+            return 0
+
+    def refresh(self):
+        # XXX: why - 2 ??
+        self.lineno = clamp(self.lineno, 0, len(self.lines) - 2)
+
+        # Make sure lineno is visible (ie: offset < lineno < offset + h)
+        self.offset = min(self.offset, self.lineno)
+        self.offset = max(self.offset, self.lineno - self.h + 1)
+
+        self.win.clear()
+        for i in range(self.win.getmaxyx()[0]):
+            self.win.move(i, 0)
+            self.render(self.win, i + self.offset)
+        self.bar.clear()
+        self.bar.move(0, 0)
+        self.render_bar(self.bar)
+        self.win.refresh()
+        self.bar.refresh()
+
+    def select(self, i):
+        return None
+
+    def toggle_currency(self):
+        return
+
+    def render_bar(self, win):
+        return
+
+
+class AccountsView(View):
+    def __init__(self, app, win):
+        super(AccountsView, self).__init__(app, win)
+        lines = ledger(app.path, 'accounts')
+        accounts = []
+        for line in lines:
+            for i in range(len(line.split(':'))):
+                a = ':'.join(line.split(':')[:i+1])
+                if a not in accounts: accounts.append(a)
+        self.lines = accounts
+
+    def render(self, win, i):
+        if i >= len(self.lines): return
+        line = self.lines[i]
+        cur = 'cursor' if i == self.lineno else None
+        win.addstr(line, self.get_attr(cur or 'account'))
+
+    def render_bar(self, win):
+        win.addstr("Accounts")
+
+    def select(self, i):
+        return RegView(self.app, self.full, self.lines[i])
+
+class RegView(View):
+    def __init__(self, app, win, account):
+        assert isinstance(account, str)
+        super(RegView, self).__init__(app, win)
+        self.account = account
+        self.currency = None
+        self.update()
+
+    def update(self):
+        form = dict(date='date', payee='payee',
+                    amount='scrub(display_amount)',
+                    commodity='commodity(scrub(display_amount))',
+                    total='scrub(display_total)',
+                    account='display_account')
+        self.lines = ledger(self.app.path, 'reg', self.account,
+                            form=form, currency=self.currency,
+                            options=['--effective', '-S', 'date'])
+
+    def render(self, win, i):
+        if i >= len(self.lines): return
+        line = self.lines[i]
+        if not line: return
+        cur = 'cursor' if i == self.lineno else None
+        win.addstr("{} ".format(line['date']), self.get_attr(cur or 'date'))
+        win.addstr("{:<20.20} ".format(line['payee']), self.get_attr(cur or 'payee'))
+        win.addstr("{:<20.20} ".format(line['account']), self.get_attr(cur or 'payee'))
+        win.addstr("{:>20} ".format(line['amount']), self.get_attr(cur or 'value_pos'))
+        tot = "ERR"
+        for t in line['total'].split('\n'):
+            if line['commodity'] in t:
+                tot = t
+        win.addstr("{:>20} ".format(tot), self.get_attr(cur))
+
+    def render_bar(self, win):
+        win.addstr(self.account)
+        if self.currency:
+            win.addstr(" ({})".format(self.currency))
+
+    def toggle_currency(self):
+        if self.currency is None:
+            self.currency = 'HKD'
+        else:
+            self.currency = None
+        self.update()
+
+    def select(self, i):
+        line = self.lines[i]
+        query = '{} @{}'.format(self.account, line['payee'])
+        date = datetime.datetime.strptime(line['date'], '%Y/%m/%d').date()
+        enddate = date + datetime.timedelta(1)
+        out = ledger(self.app.path, 'print', query,
+                     options=['--raw',
+                              '--effective',
+                              '--begin', "{}".format(date),
+                              '--end', "{}".format(enddate)])
+        return TransactionView(self.app, self.full, out)
+
+class TransactionView(View):
+    def __init__(self, app, win, lines):
+        super(TransactionView, self).__init__(app, win)
+        self.lines = lines
+    def render(self, win, i):
+        if i >= len(self.lines): return
+        line = self.lines[i]
+        cur = 'cursor' if i == self.lineno else None
+        win.addstr(line, self.get_attr(cur))
+    def select(self, i):
+        txt = self.lines[i].split()[0]
+        return RegView(self.app, self.full, txt)
+
+
+class App:
+    def __init__(self, path, scr):
+        self.path = path
+        self.scr = scr
+        self.view = AccountsView(self, self.scr)
+        self.views = [self.view]
+
+    def process(self, req):
+        #XXX: auto call refresh if lineno or offset changed.
+        step = 0
+        if req == "QUIT":
+            self.views.pop()
+            if not self.views: return True
+            self.view = self.views[-1]
+            self.view.refresh()
+        if req == "CURRENCY":
+            self.view.toggle_currency()
+            self.view.refresh()
+        if req == "NEXT_LINE": step = +1
+        if req == "PREV_LINE": step = -1
+        if req == "NEXT_PAGE":
+            step = self.view.win.getmaxyx()[0]
+            self.view.offset += self.view.win.getmaxyx()[0]
+        if req == "FIRST_LINE":
+            self.view.lineno = 0
+            self.view.offset = 0
+            self.view.refresh()
+        if req == "LAST_LINE":
+            self.view.lineno = len(self.view.lines)
+            self.view.refresh()
+        if req == "SELECT":
+            view = self.view.select(self.view.lineno)
+            if view:
+                self.views.append(view)
+                self.view = view
+                self.view.refresh()
+        self.view.lineno += step
+        if req == "MAIN" or step != 0:
+            self.view.refresh()
+
+    def run(self):
+        self.process("MAIN")
+        while True:
+            c = self.scr.getch()
+            req = KEY_MAP.get(c)
+            if self.process(req): break
+
+if len(sys.argv) != 2:
+    print "USAGE: regdel <ledger-file>"
+    sys.exit(-1)
+
+curses.initscr()
+curses.start_color()
+curses.use_default_colors()
+
+def start(scr):
+    for i, key in enumerate(LINE_INFOS):
+        inf = LINE_INFOS[key]
+        color_id = i + 1
+        curses.init_pair(color_id, inf.color, inf.bg)
+        LINE_INFOS[key] = inf._replace(color_id=color_id)
+
+    app = App(sys.argv[1], scr)
+    app.run()
+
+curses.wrapper(start)
