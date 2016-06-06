@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# coding=utf-8
 
 # Regdel, a ncurses inteface to ledger
 #
@@ -23,6 +24,9 @@ import datetime
 import subprocess
 import sys
 import csv
+
+import locale
+locale.setlocale(locale.LC_ALL, '')
 
 LineInfo = namedtuple('LineInfo', ['color_id', 'color', 'bg', 'attr'])
 
@@ -124,6 +128,22 @@ class View(object):
     def render_bar(self, win):
         return
 
+    def addstr(self, s, *args, **kargs):
+        """Call self.win.addstr with unicode support
+
+        The arguments are passed in a 'format' call.
+        'attr' is a special key argument that can be used to set the style.
+        """
+        # The code is a bit tricky because format needs the strings to be
+        # in unicode (so that the length are correct) but addstr only
+        # works with ascii.
+        def decode(x):
+            return x.decode('utf-8') if isinstance(x, str) else x
+        attr = kargs.get('attr', "")
+        args = [decode(x) for x in args]
+        kargs = {k: decode(x) for k, x in kargs.items()}
+        s = decode(s).format(*args, **kargs)
+        self.win.addstr(s.encode('utf-8'), self.get_attr(attr))
 
 class AccountsView(View):
     def __init__(self, app, win):
@@ -171,15 +191,15 @@ class RegView(View):
         line = self.lines[i]
         if not line: return
         cur = 'cursor' if i == self.lineno else None
-        win.addstr("{} ".format(line['date']), self.get_attr(cur or 'date'))
-        win.addstr("{:<20.20} ".format(line['payee']), self.get_attr(cur or 'payee'))
-        win.addstr("{:<20.20} ".format(line['account']), self.get_attr(cur or 'payee'))
-        win.addstr("{:>20} ".format(line['amount']), self.get_attr(cur or 'value_pos'))
+        self.addstr("{} ", line['date'], attr = cur or 'date')
+        self.addstr("{:<20.20} ", line['payee'], attr = cur or 'payee')
+        self.addstr("{:<20.20} ", line['account'], attr = cur or 'payee')
+        self.addstr("{:>20} ", line['amount'], attr = cur or 'value_pos')
         tot = "ERR"
         for t in line['total'].split('\n'):
             if line['commodity'] in t:
                 tot = t
-        win.addstr("{:>20} ".format(tot), self.get_attr(cur))
+        self.addstr("{:>20} ", tot, attr = cur)
 
     def render_bar(self, win):
         win.addstr(self.account)
