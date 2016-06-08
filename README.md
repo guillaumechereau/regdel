@@ -1,6 +1,8 @@
 # regdel
 Ncurses based interface to ledger: regdel is to ledger what tig is to git.
 
+![animation](/animation.gif?raw=true)
+
 Ledger (http://ledger-cli.org/) is a command line double-entry accounting
 system.
 
