@@ -65,14 +65,14 @@ def ledger(path, cmd, query="", form=None, currency=None, options=None):
         form_keys = form.keys()
         form = form.values()
     if form is not None:
-        form = ','.join('%(quoted({}))'.format(x) for x in form)
-        form += '\n\n'
+        form = ','.join('%(quoted(join({})))'.format(x) for x in form)
+        form += '\n'
         args += ['--format', form]
     if currency is not None:
         args += ['-X', currency]
     args += [query]
     out = subprocess.check_output(args)
-    out = out.split('\n\n' if form else '\n')
+    out = out.split('\n')
     if form is not None:
         out = [x for x in csv.reader(out)]
         if form_keys is not None:
@@ -196,7 +196,7 @@ class RegView(View):
         self.addstr("{:<20.20} ", line['account'], attr = cur or 'payee')
         self.addstr("{:>20} ", line['amount'], attr = cur or 'value_pos')
         tot = "ERR"
-        for t in line['total'].split('\n'):
+        for t in line['total'].split('\\n'):
             if line['commodity'] in t:
                 tot = t
         self.addstr("{:>20} ", tot, attr = cur)
