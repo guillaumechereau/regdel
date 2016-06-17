@@ -45,8 +45,9 @@ KEY_MAP = {
     curses.KEY_UP:      "PREV_LINE",
     curses.KEY_DOWN:    "NEXT_LINE",
     ord('q'):           "QUIT",
-    ord('c'):           "CURRENCY",
+    ord('x'):           "COMMODITY",
     ord('\n'):          "SELECT",
+    ord('b'):           "BALANCE",
     ord(' '):           "NEXT_PAGE",
     ord('g'):           "FIRST_LINE",
     curses.KEY_HOME:    "FIRST_LINE",
@@ -56,7 +57,7 @@ KEY_MAP = {
 
 def clamp(x, a, b): return min(max(x, a), b)
 
-def ledger(path, cmd, query="", form=None, currency=None, options=None):
+def ledger(path, cmd, query="", form=None, commodity=None, options=None):
     args = ['ledger', '-f', path]
     args += [cmd]
     if options: args += options
@@ -68,11 +69,11 @@ def ledger(path, cmd, query="", form=None, currency=None, options=None):
         form = ','.join('%(quoted(join({})))'.format(x) for x in form)
         form += '\n'
         args += ['--format', form]
-    if currency is not None:
-        args += ['-X', currency]
+    if commodity is not None:
+        args += ['-X', commodity]
     args += [query]
     out = subprocess.check_output(args)
-    out = out.split('\n')
+    out = [x for x in out.split('\n') if x.strip()]
     if form is not None:
         out = [x for x in csv.reader(out)]
         if form_keys is not None:
@@ -93,6 +94,8 @@ class View(object):
         self.w = w
         self.h = h - 1
         self.offset = 0
+        self.commodities = None
+        self.commodity = None
 
     def get_attr(self, line):
         if line in LINE_INFOS:
@@ -122,8 +125,20 @@ class View(object):
     def select(self, i):
         return None
 
-    def toggle_currency(self):
-        return
+    def selected_account(self, i):
+        return None
+
+    def toggle_commodity(self):
+        if self.commodities is None: return
+        if self.commodity in self.commodities:
+            i = self.commodities.index(self.commodity) + 1
+            if i == len(self.commodities):
+                self.commodity = None
+            else:
+                self.commodity = self.commodities[i]
+        elif self.commodities:
+            self.commodity = self.commodities[0]
+        self.update()
 
     def render_bar(self, win):
         return
@@ -173,7 +188,8 @@ class RegView(View):
         assert isinstance(account, str)
         super(RegView, self).__init__(app, win)
         self.account = account
-        self.currency = None
+        self.commodity = None
+        self.commodities = ledger(self.app.path, 'commodities', self.account)
         self.update()
 
     def update(self):
@@ -183,7 +199,7 @@ class RegView(View):
                     total='scrub(display_total)',
                     account='display_account')
         self.lines = ledger(self.app.path, 'reg', self.account,
-                            form=form, currency=self.currency,
+                            form=form, commodity=self.commodity,
                             options=['--effective', '-S', 'date'])
 
     def render(self, win, i):
@@ -203,15 +219,9 @@ class RegView(View):
 
     def render_bar(self, win):
         win.addstr(self.account)
-        if self.currency:
-            win.addstr(" ({})".format(self.currency))
-
-    def toggle_currency(self):
-        if self.currency is None:
-            self.currency = 'HKD'
-        else:
-            self.currency = None
-        self.update()
+        if self.commodity:
+            win.addstr(" ({})".format(self.commodity))
+        win.addstr(" {}".format(self.commodities))
 
     def select(self, i):
         line = self.lines[i]
@@ -225,6 +235,9 @@ class RegView(View):
                               '--end', "{}".format(enddate)])
         return TransactionView(self.app, self.full, out)
 
+    def selected_account(self, i):
+        return self.account
+
 class TransactionView(View):
     def __init__(self, app, win, lines):
         super(TransactionView, self).__init__(app, win)
@@ -237,6 +250,37 @@ class TransactionView(View):
     def select(self, i):
         txt = self.lines[i].split()[0]
         return RegView(self.app, self.full, txt)
+
+class BalanceView(View):
+    def __init__(self, app, win, account):
+        super(BalanceView, self).__init__(app, win)
+        self.account = account
+        self.commodity = None
+        self.update()
+        self.commodities = ledger(self.app.path, 'commodities', self.account)
+
+    def update(self):
+        form = dict(account='partial_account',
+                    total='scrub(display_total)')
+        self.lines = ledger(self.app.path, 'bal', self.account,
+                            form=form, commodity=self.commodity,
+                            options=[])
+
+    def render(self, win, i):
+        if i >= len(self.lines): return
+        line = self.lines[i]
+        if not line: return
+        cur = 'cursor' if i == self.lineno else None
+        self.addstr("{:<20.20} ", line['account'], attr = cur or 'payee')
+
+        tot = ' + '.join(line['total'].split('\\n'))
+        self.addstr("{:<60.60} ", tot, attr = cur or 'payee')
+
+    def render_bar(self, win):
+        win.addstr("Balance {}".format(self.account))
+        if self.commodity:
+            win.addstr(" ({})".format(self.commodity))
+        win.addstr(" {}".format(self.commodities))
 
 
 class App:
@@ -254,8 +298,8 @@ class App:
             if not self.views: return True
             self.view = self.views[-1]
             self.view.refresh()
-        if req == "CURRENCY":
-            self.view.toggle_currency()
+        if req == "COMMODITY":
+            self.view.toggle_commodity()
             self.view.refresh()
         if req == "NEXT_LINE": step = +1
         if req == "PREV_LINE": step = -1
@@ -272,6 +316,13 @@ class App:
         if req == "SELECT":
             view = self.view.select(self.view.lineno)
             if view:
+                self.views.append(view)
+                self.view = view
+                self.view.refresh()
+        if req == "BALANCE":
+            account = self.view.selected_account(self.view.lineno)
+            if account:
+                view = BalanceView(self, self.scr, account)
                 self.views.append(view)
                 self.view = view
                 self.view.refresh()
