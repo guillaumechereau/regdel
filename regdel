@@ -105,8 +105,7 @@ class View(object):
             return 0
 
     def refresh(self):
-        # XXX: why - 2 ??
-        self.lineno = clamp(self.lineno, 0, len(self.lines) - 2)
+        self.lineno = clamp(self.lineno, 0, len(self.lines) - 1)
 
         # Make sure lineno is visible (ie: offset < lineno < offset + h)
         self.offset = min(self.offset, self.lineno)
