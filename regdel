@@ -72,7 +72,7 @@ def ledger(path, cmd, query="", form=None, commodity=None, options=None):
     if commodity is not None:
         args += ['-X', commodity]
     args += [query]
-    out = subprocess.check_output(args)
+    out = subprocess.check_output(args, stderr=subprocess.STDOUT)
     out = [x for x in out.split('\n') if x.strip()]
     if form is not None:
         out = [x for x in csv.reader(out)]
@@ -354,4 +354,9 @@ def start(scr):
     app = App(sys.argv[1], scr)
     app.run()
 
-curses.wrapper(start)
+try:
+    curses.wrapper(start)
+except subprocess.CalledProcessError as err:
+    print err.output
+except Exception as err:
+    print err
