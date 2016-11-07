@@ -291,7 +291,7 @@ class BalanceView(View):
                     total='scrub(display_total)')
         self.lines = ledger(self.app.path, 'bal', self.account,
                             form=form, commodity=self.commodity,
-                            real=self.real, options=[])
+                            real=self.real, options=['--empty'])
 
     def render(self, win, i):
         if i >= len(self.lines): return
