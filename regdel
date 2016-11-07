@@ -190,7 +190,7 @@ class AccountsView(View):
         line = self.lines[i]
         cur = 'cursor' if i == self.lineno else None
         parts = line.split(":")
-        text = "    " * (len(parts) - 1) + parts[-1]
+        text = "  " * (len(parts) - 1) + parts[-1]
         win.addstr(text, self.get_attr(cur or 'account'))
 
     def render_bar(self, win):
@@ -200,6 +200,11 @@ class AccountsView(View):
 
     def select(self, i):
         return RegView(self.app, self.full, self.lines[i])
+
+    # So that the 'b' key shows the balance.
+    # XXX: we could directly show the balance from the start?
+    def selected_account(self, i):
+        return ""
 
 class RegView(View):
     def __init__(self, app, win, account):
@@ -282,7 +287,7 @@ class BalanceView(View):
                                   real=self.real)
 
     def update(self):
-        form = dict(account='partial_account',
+        form = dict(account='account',
                     total='scrub(display_total)')
         self.lines = ledger(self.app.path, 'bal', self.account,
                             form=form, commodity=self.commodity,
@@ -293,8 +298,10 @@ class BalanceView(View):
         line = self.lines[i]
         if not line: return
         cur = 'cursor' if i == self.lineno else None
-        self.addstr("{:<20.20} ", line['account'], attr = cur or 'payee')
 
+        parts = line['account'].split(":")
+        text = "  " * (len(parts) - 1) + parts[-1]
+        self.addstr("{:<20.20} ", text, attr = cur or 'payee')
         tot = ' + '.join(line['total'].split('\\n'))
         self.addstr("{:<60.60} ", tot, attr = cur or 'payee')
 
@@ -348,7 +355,7 @@ class App:
                 self.view.refresh()
         if req == "BALANCE":
             account = self.view.selected_account(self.view.lineno)
-            if account:
+            if account is not None:
                 view = BalanceView(self, self.scr, account)
                 self.views.append(view)
                 self.view = view
