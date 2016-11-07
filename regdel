@@ -319,7 +319,7 @@ class App:
             if not self.views: return True
             self.view = self.views[-1]
             self.view.refresh()
-        if req == "COMMODITY":
+        if req == "REAL":
             self.view.toggle_real()
             self.view.refresh()
         if req == "COMMODITY":
