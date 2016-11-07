@@ -313,6 +313,9 @@ class BalanceView(View):
             win.addstr(" ({})".format(self.commodity))
         win.addstr(" {}".format(self.commodities))
 
+    def select(self, i):
+        return RegView(self.app, self.full, self.lines[i]['account'])
+
 
 class App:
     def __init__(self, path, scr):
