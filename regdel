@@ -21,6 +21,7 @@ import itertools
 from collections import namedtuple
 import curses
 import datetime
+import re
 import subprocess
 import sys
 import csv
@@ -188,7 +189,9 @@ class AccountsView(View):
         if i >= len(self.lines): return
         line = self.lines[i]
         cur = 'cursor' if i == self.lineno else None
-        win.addstr(line, self.get_attr(cur or 'account'))
+        parts = line.split(":")
+        text = "    " * (len(parts) - 1) + parts[-1]
+        win.addstr(text, self.get_attr(cur or 'account'))
 
     def render_bar(self, win):
         win.addstr("Accounts")
