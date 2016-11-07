@@ -45,11 +45,15 @@ KEY_MAP = {
     curses.KEY_UP:      "PREV_LINE",
     curses.KEY_DOWN:    "NEXT_LINE",
     ord('q'):           "QUIT",
+    curses.KEY_EXIT:    "QUIT",
+    curses.KEY_F10:     "QUIT",
     ord('x'):           "COMMODITY",
     ord('r'):           "REAL",
     ord('\n'):          "SELECT",
     ord('b'):           "BALANCE",
     ord(' '):           "NEXT_PAGE",
+    curses.KEY_NPAGE:   "NEXT_PAGE",
+    curses.KEY_PPAGE:   "PREV_PAGE",
     ord('g'):           "FIRST_LINE",
     curses.KEY_HOME:    "FIRST_LINE",
     ord('G'):           "LAST_LINE",
@@ -176,13 +180,8 @@ class AccountsView(View):
         self.update()
 
     def update(self):
-        lines = ledger(self.app.path, 'accounts', real=self.real)
-        accounts = []
-        for line in lines:
-            for i in range(len(line.split(':'))):
-                a = ':'.join(line.split(':')[:i+1])
-                if a not in accounts: accounts.append(a)
-        self.lines = accounts
+        self.lines = ledger(self.app.path, 'balance', real=self.real,
+                            options=[ '--flat', '--no-total' ])
 
     def render(self, win, i):
         if i >= len(self.lines): return
@@ -196,7 +195,14 @@ class AccountsView(View):
             win.addstr(" (REAL)")
 
     def select(self, i):
-        return RegView(self.app, self.full, self.lines[i])
+        if len(self.lines) <= i:
+            return None
+        tokens = self.lines[i].split("  ")
+        tokens = [token for token in tokens if len(token) > 0]
+        if len(tokens) <= 1:
+            return None
+        txt = tokens[len(tokens) - 1]
+        return RegView(self.app, self.full, txt)
 
 class RegView(View):
     def __init__(self, app, win, account):
@@ -330,6 +336,11 @@ class App:
         if req == "NEXT_PAGE":
             step = self.view.win.getmaxyx()[0]
             self.view.offset += self.view.win.getmaxyx()[0]
+        if req == "PREV_PAGE":
+            step = -self.view.win.getmaxyx()[0]
+            self.view.offset -= self.view.win.getmaxyx()[0]
+            if self.view.offset < 0:
+                self.view.offset = 0
         if req == "FIRST_LINE":
             self.view.lineno = 0
             self.view.offset = 0
