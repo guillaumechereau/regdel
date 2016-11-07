@@ -18,6 +18,7 @@ so it might not work very well on other files.
 - up, k: move up
 - down, j: move down
 - enter: select
-- q: exit
+- q: exit/back
 - b: show balance view
 - x: toggle commodities
+- r: toggle --real

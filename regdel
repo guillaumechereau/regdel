@@ -46,6 +46,7 @@ KEY_MAP = {
     curses.KEY_DOWN:    "NEXT_LINE",
     ord('q'):           "QUIT",
     ord('x'):           "COMMODITY",
+    ord('r'):           "REAL",
     ord('\n'):          "SELECT",
     ord('b'):           "BALANCE",
     ord(' '):           "NEXT_PAGE",
@@ -57,7 +58,7 @@ KEY_MAP = {
 
 def clamp(x, a, b): return min(max(x, a), b)
 
-def ledger(path, cmd, query="", form=None, commodity=None, options=None):
+def ledger(path, cmd, query="", form=None, commodity=None, real=None, options=None):
     args = ['ledger', '-f', path]
     args += [cmd]
     if options: args += options
@@ -71,6 +72,8 @@ def ledger(path, cmd, query="", form=None, commodity=None, options=None):
         args += ['--format', form]
     if commodity is not None:
         args += ['-X', commodity]
+    if real is True:
+        args += ['--real']
     args += [query]
     out = subprocess.check_output(args, stderr=subprocess.STDOUT)
     out = [x for x in out.split('\n') if x.strip()]
@@ -96,6 +99,7 @@ class View(object):
         self.offset = 0
         self.commodities = None
         self.commodity = None
+        self.real = False
 
     def get_attr(self, line):
         if line in LINE_INFOS:
@@ -126,6 +130,10 @@ class View(object):
 
     def selected_account(self, i):
         return None
+
+    def toggle_real(self):
+        self.real = not self.real
+        self.update()
 
     def toggle_commodity(self):
         if self.commodities is None: return
@@ -159,10 +167,16 @@ class View(object):
         s = decode(s).format(*args, **kargs)
         self.win.addstr(s.encode('utf-8'), self.get_attr(attr))
 
+    def update(self):
+        return
+
 class AccountsView(View):
     def __init__(self, app, win):
         super(AccountsView, self).__init__(app, win)
-        lines = ledger(app.path, 'accounts')
+        self.update()
+
+    def update(self):
+        lines = ledger(self.app.path, 'accounts', real=self.real)
         accounts = []
         for line in lines:
             for i in range(len(line.split(':'))):
@@ -178,6 +192,8 @@ class AccountsView(View):
 
     def render_bar(self, win):
         win.addstr("Accounts")
+        if self.real is True:
+            win.addstr(" (REAL)")
 
     def select(self, i):
         return RegView(self.app, self.full, self.lines[i])
@@ -188,7 +204,8 @@ class RegView(View):
         super(RegView, self).__init__(app, win)
         self.account = account
         self.commodity = None
-        self.commodities = ledger(self.app.path, 'commodities', self.account)
+        self.commodities = ledger(self.app.path, 'commodities', self.account,
+                                  real=self.real)
         self.update()
 
     def update(self):
@@ -198,7 +215,7 @@ class RegView(View):
                     total='scrub(display_total)',
                     account='display_account')
         self.lines = ledger(self.app.path, 'reg', self.account,
-                            form=form, commodity=self.commodity,
+                            form=form, commodity=self.commodity, real=self.real,
                             options=['--effective', '-S', 'date'])
 
     def render(self, win, i):
@@ -218,6 +235,8 @@ class RegView(View):
 
     def render_bar(self, win):
         win.addstr(self.account)
+        if self.real is True:
+            win.addstr(" (REAL)")
         if self.commodity:
             win.addstr(" ({})".format(self.commodity))
         win.addstr(" {}".format(self.commodities))
@@ -227,7 +246,7 @@ class RegView(View):
         query = '{} @{}'.format(self.account, line['payee'])
         date = datetime.datetime.strptime(line['date'], '%Y/%m/%d').date()
         enddate = date + datetime.timedelta(1)
-        out = ledger(self.app.path, 'print', query,
+        out = ledger(self.app.path, 'print', query, real=self.real,
                      options=['--raw',
                               '--effective',
                               '--begin', "{}".format(date),
@@ -256,14 +275,15 @@ class BalanceView(View):
         self.account = account
         self.commodity = None
         self.update()
-        self.commodities = ledger(self.app.path, 'commodities', self.account)
+        self.commodities = ledger(self.app.path, 'commodities', self.account,
+                                  real=self.real)
 
     def update(self):
         form = dict(account='partial_account',
                     total='scrub(display_total)')
         self.lines = ledger(self.app.path, 'bal', self.account,
                             form=form, commodity=self.commodity,
-                            options=[])
+                            real=self.real, options=[])
 
     def render(self, win, i):
         if i >= len(self.lines): return
@@ -277,6 +297,8 @@ class BalanceView(View):
 
     def render_bar(self, win):
         win.addstr("Balance {}".format(self.account))
+        if self.real is True:
+            win.addstr(" (REAL)")
         if self.commodity:
             win.addstr(" ({})".format(self.commodity))
         win.addstr(" {}".format(self.commodities))
@@ -296,6 +318,9 @@ class App:
             self.views.pop()
             if not self.views: return True
             self.view = self.views[-1]
+            self.view.refresh()
+        if req == "COMMODITY":
+            self.view.toggle_real()
             self.view.refresh()
         if req == "COMMODITY":
             self.view.toggle_commodity()
