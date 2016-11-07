@@ -169,14 +169,8 @@ class AccountsView(View):
         self.update()
 
     def update(self):
-        lines = ledger(self.app.path, 'balance',
+        self.lines = ledger(self.app.path, 'balance',
                        options=[ '--flat', '--no-total' ])
-        accounts = []
-        for line in lines:
-            for i in range(len(line.split(':'))):
-                a = ':'.join(line.split(':')[:i+1])
-                if a not in accounts: accounts.append(a)
-        self.lines = accounts
 
     def render(self, win, i):
         if i >= len(self.lines): return
