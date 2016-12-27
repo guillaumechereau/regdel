@@ -61,6 +61,10 @@ KEY_MAP = {
 
 def clamp(x, a, b): return min(max(x, a), b)
 
+def round_nice(x, n=0):
+    power = max(0, round(log10(x)) - n)
+    return ceil(x / (10 ** power)) * (10 ** power)
+
 def ledger(path, cmd, query="", form=None, commodity=None, real=None, options=None):
     args = ['ledger', '-f', path]
     args += [cmd]
@@ -87,7 +91,8 @@ def ledger(path, cmd, query="", form=None, commodity=None, real=None, options=No
     return out
 
 def resample(amounts, size):
-    """from a list of tuples: (date, value), generates a pandas timeserie.
+    """from a list of tuples: (date, value), generates a pandas timeserie
+       of the average value per month.
        size is the number of values we want in the table.
     """
     ts = pd.DataFrame([float(x[1]) for x in amounts],
@@ -99,6 +104,8 @@ def resample(amounts, size):
     ts.fillna(0, inplace=True)
     ts = pd.rolling_window(ts, 2 * 30 / freq.days, win_type='hamming',
                            min_periods=0, center=True)
+    # Compute the average per month.
+    ts *= pd.Timedelta('30d') / freq
     return ts
 
 class View(object):
@@ -260,7 +267,7 @@ class RegView(View):
                                   real=self.real,
                                   form = ['date', 'quantity(display_amount)'],
                                   options=['--effective', '-S', 'date'])
-            self.amounts = resample(self.amounts, w)
+            self.amounts = resample(self.amounts, w - 16)
             self.amounts = self.amounts[0]
             self.win.resize(h - 9, w)
             self.graph_win = curses.newwin(8, w, h - 8, 0)
@@ -300,7 +307,17 @@ class RegView(View):
         vmax = max(abs(self.amounts.max()), abs(self.amounts.min()))
         current_date = pd.Timestamp(self.lines[self.lineno]['date'])
         CHARS = u' ▁▂▃▄▅▆▇█'
+
         unit = vmax / (h - 3)
+        unit = round_nice(unit, 1)
+        commodity = self.lines[0]['commodity']
+
+        delta = self.amounts.index[1] - self.amounts.index[0]
+        for i in range(0, h - 3, 1):
+            label = unit * (i + 0.5)
+            label = "{:,}".format(label)
+            win.addstr(h - 3 - i, 0, "{:>15}".format(label))
+            win.addstr(h - 3 - i, 15, "┤")
 
         def make_line(v):
             n = v / unit
@@ -313,18 +330,27 @@ class RegView(View):
 
         month = None
         year = None
+        current_v = None
         for i, (d, v) in enumerate(self.amounts.iteritems()):
             if isnan(v): continue
-            attr = 'date' if abs((d - current_date).days) <= 4 else ''
+            attr = None
+            if current_v is None and d >= current_date:
+                attr = 'date'
+                current_v = v
             attr = self.get_attr(attr)
             for y, c in make_line(v):
-                win.addstr(y, i, c.encode('utf-8'), attr)
+                win.addstr(y, i + 16, c.encode('utf-8'), attr)
             if year != d.year:
                 year = d.year
-                win.addstr(h - 1, i, "%d" % year)
+                win.addstr(h - 1, i + 16, "%d" % year)
             if month != d.month:
                 month = d.month
-                win.addstr(h - 2, i, MONTHS[d.month])
+                win.addstr(h - 2, i + 16, MONTHS[d.month])
+
+        if current_v is not None:
+            win.addstr(1, w / 2 - 8,
+                       "{:,.0f} {} / month".format(current_v, commodity),
+                       self.get_attr('date'))
 
     def select(self, i):
         line = self.lines[i]
