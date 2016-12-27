@@ -293,28 +293,38 @@ class RegView(View):
         win.addstr(" {}".format(self.commodities))
 
     def render_graph(self, win):
+        MONTHS = [None, "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul",
+                        "Aug", "Sep", "Oct", "Nov", "Dec"]
         h, w = win.getmaxyx()
         if self.amounts is None: return
         vmax = max(abs(self.amounts.max()), abs(self.amounts.min()))
         current_date = pd.Timestamp(self.lines[self.lineno]['date'])
         CHARS = u' ▁▂▃▄▅▆▇█'
-        unit = vmax / h
+        unit = vmax / (h - 3)
 
         def make_line(v):
             n = v / unit
             n = abs(n)
             for i in range(int(n)):
-                yield h - i - 1, CHARS[8]
+                yield h - i - 3, CHARS[8]
             rest = int((n - int(n)) * 8)
             if rest:
-                yield h - int(n) - 1, CHARS[rest]
+                yield h - int(n) - 3, CHARS[rest]
 
+        month = None
+        year = None
         for i, (d, v) in enumerate(self.amounts.iteritems()):
             if isnan(v): continue
             attr = 'date' if abs((d - current_date).days) <= 4 else ''
             attr = self.get_attr(attr)
             for y, c in make_line(v):
                 win.addstr(y, i, c.encode('utf-8'), attr)
+            if year != d.year:
+                year = d.year
+                win.addstr(h - 1, i, "%d" % year)
+            if month != d.month:
+                month = d.month
+                win.addstr(h - 2, i, MONTHS[d.month])
 
     def select(self, i):
         line = self.lines[i]
