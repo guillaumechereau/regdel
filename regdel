@@ -86,15 +86,18 @@ def ledger(path, cmd, query="", form=None, commodity=None, real=None, options=No
             out = [{k:v for k, v in zip(form_keys, x)} for x in out]
     return out
 
-def resample(amounts, freq):
-    """from a list of tuples: (date, value), generates a pandas timeserie
-       freq is the sample size in days.
+def resample(amounts, size):
+    """from a list of tuples: (date, value), generates a pandas timeserie.
+       size is the number of values we want in the table.
     """
     ts = pd.DataFrame([float(x[1]) for x in amounts],
                       index=[pd.Timestamp(x[0]) for x in amounts])
-    ts = ts.resample('{}d'.format(freq), how='sum')
+    freq = ((ts.index[-1] - ts.index[0]) / size).round('d') + \
+            pd.Timedelta('1d')
+
+    ts = ts.resample(freq, how='sum')
     ts.fillna(0, inplace=True)
-    ts = pd.rolling_window(ts, 2 * 30 / freq, win_type='hamming',
+    ts = pd.rolling_window(ts, 2 * 30 / freq.days, win_type='hamming',
                            min_periods=0, center=True)
     return ts
 
@@ -257,9 +260,9 @@ class RegView(View):
                                   real=self.real,
                                   form = ['date', 'quantity(display_amount)'],
                                   options=['--effective', '-S', 'date'])
-            self.amounts = resample(self.amounts, 4)
+            self.amounts = resample(self.amounts, w)
             self.amounts = self.amounts[0]
-            self.win.resize(h - 8, w)
+            self.win.resize(h - 9, w)
             self.graph_win = curses.newwin(8, w, h - 8, 0)
         else:
             self.amounts = None
@@ -290,7 +293,7 @@ class RegView(View):
         win.addstr(" {}".format(self.commodities))
 
     def render_graph(self, win):
-        h = win.getmaxyx()[0] - 1
+        h, w = win.getmaxyx()
         if self.amounts is None: return
         vmax = max(abs(self.amounts.max()), abs(self.amounts.min()))
         current_date = pd.Timestamp(self.lines[self.lineno]['date'])
@@ -301,10 +304,10 @@ class RegView(View):
             n = v / unit
             n = abs(n)
             for i in range(int(n)):
-                yield h - i, CHARS[8]
+                yield h - i - 1, CHARS[8]
             rest = int((n - int(n)) * 8)
             if rest:
-                yield h - int(n), CHARS[rest]
+                yield h - int(n) - 1, CHARS[rest]
 
         for i, (d, v) in enumerate(self.amounts.iteritems()):
             if isnan(v): continue
@@ -312,7 +315,6 @@ class RegView(View):
             attr = self.get_attr(attr)
             for y, c in make_line(v):
                 win.addstr(y, i, c.encode('utf-8'), attr)
-
 
     def select(self, i):
         line = self.lines[i]
