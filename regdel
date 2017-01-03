@@ -52,7 +52,9 @@ KEY_MAP = {
     ord('r'):           "REAL",
     ord('\n'):          "SELECT",
     ord('b'):           "BALANCE",
+    curses.KEY_NPAGE:   "NEXT_PAGE",
     ord(' '):           "NEXT_PAGE",
+    curses.KEY_PPAGE:   "PREV_PAGE",
     ord('g'):           "FIRST_LINE",
     curses.KEY_HOME:    "FIRST_LINE",
     ord('G'):           "LAST_LINE",
@@ -430,6 +432,7 @@ class App:
     def process(self, req):
         #XXX: auto call refresh if lineno or offset changed.
         step = 0
+        page_height = self.view.win.getmaxyx()[0]
         if req == "QUIT":
             self.views.pop()
             if not self.views: return True
@@ -444,8 +447,12 @@ class App:
         if req == "NEXT_LINE": step = +1
         if req == "PREV_LINE": step = -1
         if req == "NEXT_PAGE":
-            step = self.view.win.getmaxyx()[0]
-            self.view.offset += self.view.win.getmaxyx()[0]
+            step = page_height
+            if self.view.offset + page_height < len(self.view.lines):
+                self.view.offset += page_height
+        if req == "PREV_PAGE":
+            step = -page_height
+            self.view.offset = max(0, self.view.offset - page_height)
         if req == "FIRST_LINE":
             self.view.lineno = 0
             self.view.offset = 0
