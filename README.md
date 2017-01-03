@@ -22,3 +22,4 @@ so it might not work very well on other files.
 - b: show balance view
 - x: toggle commodities
 - r: toggle --real
+- /: run custom query

@@ -47,16 +47,22 @@ KEY_MAP = {
     ord('j'):           "NEXT_LINE",
     curses.KEY_UP:      "PREV_LINE",
     curses.KEY_DOWN:    "NEXT_LINE",
+    27:                 "QUIT",
     ord('q'):           "QUIT",
+    curses.KEY_EXIT:    "QUIT",
+    curses.KEY_F10:     "QUIT",
     ord('x'):           "COMMODITY",
     ord('r'):           "REAL",
     ord('\n'):          "SELECT",
     ord('b'):           "BALANCE",
     ord(' '):           "NEXT_PAGE",
+    curses.KEY_NPAGE:   "NEXT_PAGE",
+    curses.KEY_PPAGE:   "PREV_PAGE",
     ord('g'):           "FIRST_LINE",
     curses.KEY_HOME:    "FIRST_LINE",
     ord('G'):           "LAST_LINE",
     curses.KEY_END:     "LAST_LINE",
+    ord('/'):           "SEARCH",
 }
 
 def clamp(x, a, b): return min(max(x, a), b)
@@ -209,16 +215,11 @@ class AccountsView(View):
         self.update()
 
     def update(self):
-        lines = ledger(self.app.path, 'accounts', real=self.real)
-        accounts = []
-        for line in lines:
-            for i in range(len(line.split(':'))):
-                a = ':'.join(line.split(':')[:i+1])
-                if a not in accounts: accounts.append(a)
-        self.lines = accounts
+        self.lines = ledger(self.app.path, 'balance', real=self.real,
+                            options=[ '--flat', '--no-total' ])
 
     def render(self, win, i):
-        if i >= len(self.lines): return
+        if i < 0 or i >= len(self.lines): return
         line = self.lines[i]
         cur = 'cursor' if i == self.lineno else None
         parts = line.split(":")
@@ -231,7 +232,15 @@ class AccountsView(View):
             win.addstr(" (REAL)")
 
     def select(self, i):
-        return RegView(self.app, self.full, self.lines[i])
+        if len(self.lines) <= i:
+            return None
+        tokens = self.lines[i].split("  ")
+        tokens = [token for token in tokens if len(token) > 0]
+        if len(tokens) <= 1:
+            return None
+        txt = tokens[len(tokens) - 1]
+        self.app.query = txt
+        return RegView(self.app, self.full, txt)
 
     # So that the 'b' key shows the balance.
     # XXX: we could directly show the balance from the start?
@@ -277,7 +286,7 @@ class RegView(View):
             self.win.resize(h - 1, w)
 
     def render(self, win, i):
-        if i >= len(self.lines): return
+        if i < 0 or i >= len(self.lines): return
         line = self.lines[i]
         if not line: return
         cur = 'cursor' if i == self.lineno else None
@@ -372,7 +381,7 @@ class TransactionView(View):
         super(TransactionView, self).__init__(app, win)
         self.lines = lines
     def render(self, win, i):
-        if i >= len(self.lines): return
+        if i < 0 or i >= len(self.lines): return
         line = self.lines[i]
         cur = 'cursor' if i == self.lineno else None
         win.addstr(line, self.get_attr(cur))
@@ -397,7 +406,7 @@ class BalanceView(View):
                             real=self.real, options=['--empty', '--no-total'])
 
     def render(self, win, i):
-        if i >= len(self.lines): return
+        if i < 0 or i >= len(self.lines): return
         line = self.lines[i]
         if not line: return
         cur = 'cursor' if i == self.lineno else None
@@ -422,6 +431,9 @@ class BalanceView(View):
 
 class App:
     def __init__(self, path, scr):
+        self.mode = "NORMAL"
+        self.textpad = None
+        self.query = ""
         self.path = path
         self.scr = scr
         self.view = AccountsView(self, self.scr)
@@ -446,6 +458,11 @@ class App:
         if req == "NEXT_PAGE":
             step = self.view.win.getmaxyx()[0]
             self.view.offset += self.view.win.getmaxyx()[0]
+        if req == "PREV_PAGE":
+            step = -self.view.win.getmaxyx()[0]
+            self.view.offset -= self.view.win.getmaxyx()[0]
+            if self.view.offset < 0:
+                self.view.offset = 0
         if req == "FIRST_LINE":
             self.view.lineno = 0
             self.view.offset = 0
@@ -466,16 +483,51 @@ class App:
                 self.views.append(view)
                 self.view = view
                 self.view.refresh()
+        if req == "SEARCH":
+            self.mode = "COMMAND"
+            if self.textpad == None:
+                self.textpad = curses.newwin(1,self.view.full.getmaxyx()[1],1,0)
+            self.refreshCommand()
         self.view.lineno += step
         if req == "MAIN" or step != 0:
             self.view.refresh()
+
+    def refreshCommand(self):
+        self.textpad.clear()
+        self.textpad.addstr("query # " + self.query)
+        self.textpad.refresh()
+
+    def processCommand(self, c):
+        if c == ord('\n'):
+            view = RegView(self, self.view.full, self.query)
+            self.views.append(view)
+            self.view = view
+            self.view.refresh()
+            self.textpad.erase()
+            self.mode = "NORMAL"
+        elif c == 127:
+            self.query = self.query[:-1]
+            self.refreshCommand()
+        elif c == 27:
+            self.query = ""
+            self.textpad.erase()
+            self.mode = "NORMAL"
+            self.textpad.refresh()
+            self.view.refresh()
+        elif c < 256:
+            self.textpad.addch(c)
+            self.textpad.refresh()
+            self.query += chr(c)
 
     def run(self):
         self.process("MAIN")
         while True:
             c = self.scr.getch()
-            req = KEY_MAP.get(c)
-            if self.process(req): break
+            if self.mode == "NORMAL":
+                req = KEY_MAP.get(c)
+                if self.process(req): break
+            else:
+                self.processCommand(c)
 
 if len(sys.argv) != 2:
     print "USAGE: regdel <ledger-file>"
