@@ -97,10 +97,10 @@ def resample(amounts, size):
     """
     ts = pd.DataFrame([float(x[1]) for x in amounts],
                       index=[pd.Timestamp(x[0]) for x in amounts])
-    freq = ((ts.index[-1] - ts.index[0]) / size).round('d') + \
+    freq = (pd.Timedelta(ts.index[-1] - ts.index[0]) / size).round('d') + \
             pd.Timedelta('1d')
 
-    ts = ts.resample(freq, how='sum')
+    ts = ts.resample("%dd" % freq.days , how='sum')
     ts.fillna(0, inplace=True)
     ts = pd.rolling_window(ts, 2 * 30 / freq.days, win_type='hamming',
                            min_periods=0, center=True)
@@ -499,5 +499,3 @@ try:
     curses.wrapper(start)
 except subprocess.CalledProcessError as err:
     print err.output
-except Exception as err:
-    print err
