@@ -26,7 +26,6 @@ import re
 import subprocess
 import sys
 import csv
-import pandas as pd
 
 import locale
 locale.setlocale(locale.LC_ALL, '')
@@ -120,7 +119,6 @@ class View(object):
         self.win = curses.newwin(h - 1, w, 1, 0)
         self.bar = curses.newwin(1, w, 0, 0)
         self.bar.bkgdset(' ', self.get_attr('bar'))
-        self.graph_win = None
         self.w = w
         self.h = h - 1
         self.offset = 0
@@ -150,13 +148,6 @@ class View(object):
         self.bar.clear()
         self.bar.move(0, 0)
         self.render_bar(self.bar)
-
-        if self.graph_win:
-            self.graph_win.clear()
-            self.graph_win.move(0, 0)
-            self.render_graph(self.graph_win)
-            self.graph_win.refresh()
-
         self.win.refresh()
         self.bar.refresh()
 
@@ -261,22 +252,7 @@ class RegView(View):
         self.lines = ledger(self.app.path, 'reg', self.account,
                             form=form, commodity=self.commodity, real=self.real,
                             options=['--effective', '-S', 'date'])
-
-        if self.lines and all(x['commodity'] == self.lines[0]['commodity']
-                              for x in self.lines):
-            self.amounts = ledger(self.app.path, 'reg', self.account,
-                                  commodity=self.commodity,
-                                  real=self.real,
-                                  form = ['date', 'quantity(display_amount)'],
-                                  options=['--effective', '-S', 'date'])
-            self.amounts = resample(self.amounts, w - 16)
-            self.amounts = self.amounts[0]
-            self.win.resize(h - 9, w)
-            self.graph_win = curses.newwin(8, w, h - 8, 0)
-        else:
-            self.amounts = None
-            self.graph_win = None
-            self.win.resize(h - 1, w)
+        self.win.resize(h - 1, w)
 
     def render(self, win, i):
         if i >= len(self.lines): return
@@ -300,59 +276,6 @@ class RegView(View):
         if self.commodity:
             win.addstr(" ({})".format(self.commodity))
         win.addstr(" {}".format(self.commodities))
-
-    def render_graph(self, win):
-        MONTHS = [None, "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul",
-                        "Aug", "Sep", "Oct", "Nov", "Dec"]
-        h, w = win.getmaxyx()
-        if self.amounts is None: return
-        vmax = max(abs(self.amounts.max()), abs(self.amounts.min()))
-        current_date = pd.Timestamp(self.lines[self.lineno]['date'])
-        CHARS = u' ▁▂▃▄▅▆▇█'
-
-        unit = vmax / (h - 3)
-        unit = round_nice(unit, 1)
-        commodity = self.lines[0]['commodity']
-
-        delta = self.amounts.index[1] - self.amounts.index[0]
-        for i in range(0, h - 3, 1):
-            label = unit * (i + 0.5)
-            label = "{:,}".format(label)
-            win.addstr(h - 3 - i, 0, "{:>15}".format(label))
-            win.addstr(h - 3 - i, 15, "┤")
-
-        def make_line(v):
-            n = v / unit
-            n = abs(n)
-            for i in range(int(n)):
-                yield h - i - 3, CHARS[8]
-            rest = int((n - int(n)) * 8)
-            if rest:
-                yield h - int(n) - 3, CHARS[rest]
-
-        month = None
-        year = None
-        current_v = None
-        for i, (d, v) in enumerate(self.amounts.iteritems()):
-            if isnan(v): continue
-            attr = None
-            if current_v is None and d >= current_date:
-                attr = 'date'
-                current_v = v
-            attr = self.get_attr(attr)
-            for y, c in make_line(v):
-                win.addstr(y, i + 16, c.encode('utf-8'), attr)
-            if year != d.year:
-                year = d.year
-                win.addstr(h - 1, i + 16, "%d" % year)
-            if month != d.month:
-                month = d.month
-                win.addstr(h - 2, i + 16, MONTHS[d.month])
-
-        if current_v is not None:
-            win.addstr(1, w / 2 - 8,
-                       "{:,.0f} {} / month".format(current_v, commodity),
-                       self.get_attr('date'))
 
     def select(self, i):
         line = self.lines[i]
