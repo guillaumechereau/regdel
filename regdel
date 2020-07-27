@@ -277,10 +277,17 @@ class RegView(View):
             win.addstr(" ({})".format(self.commodity))
         win.addstr(" {}".format(self.commodities))
 
+    def _convert_date(self, date_str):
+        for fmt in '%Y/%m/%d', '%Y-%m-%d':
+            try:
+                return datetime.datetime.strptime(date_str, fmt).date()
+            except ValueError:
+                pass
+
     def select(self, i):
         line = self.lines[i]
         query = '{} @{}'.format(self.account, line['payee'])
-        date = datetime.datetime.strptime(line['date'], '%Y/%m/%d').date()
+        date = self._convert_date(line['date'])
         enddate = date + datetime.timedelta(1)
         out = ledger(self.app.path, 'print', query, real=self.real,
                      options=['--raw',
